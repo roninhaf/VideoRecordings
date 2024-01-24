@@ -6,13 +6,10 @@ const Recorder = ({ addRecording }) => {
   const [recordingName, setRecordingName] = useState("Session Name");
   const [count, setCount] = useState(1);
   const mediaRecorderRef = useRef(null);
+  const startTimeRef = useRef(null);
   const chunksRef = useRef([]);
-  const videoRef = useRef(null);
-  const newRecording = {};
 
   const startRecording = () => {
-    const recordingStartTime = new Date().getTime();
-
     navigator.mediaDevices
       .getUserMedia({ audio: true, video: true })
       .then((stream) => {
@@ -24,24 +21,41 @@ const Recorder = ({ addRecording }) => {
           }
         };
 
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onstart = () => {
+          startTimeRef.current = Date.now();
+        };
+
+        mediaRecorder.onstop = async () => {
+          const endTime = Date.now();
+          const durationInSeconds = Math.round((endTime - startTimeRef.current) / 1000);
+
           const blob = new Blob(chunksRef.current, { type: "video/webm" });
-          const url = URL.createObjectURL(blob);
-          const lengthInSeconds = Math.round(
-            (new Date().getTime() - recordingStartTime) / 1000
-          );
+          const formData = new FormData();
+          formData.append("recording", blob, "recording.webm");
 
-          newRecording = {
-            name: recordingName + count.toLocaleString(),
-            timestamp: new Date().toLocaleString(),
-            length: formatRecordingLength(lengthInSeconds),
-            status: "",
-            videoUrl: url,
-          };
+          try {
+            const response = await axios.post(
+              "http://localhost:3001/api/upload",
+              formData
+            );
 
-          addRecording(newRecording);
+            // Create a new recording object
+            const newRecording = {
+              name: recordingName + count.toLocaleString(),
+              timestamp: new Date().toLocaleString(),
+              length: formatRecordingLength(durationInSeconds),
+              status: response.data.status, // Updated status from the server
+              videoUrl: URL.createObjectURL(blob),
+            };
+
+            // Add the new recording to the list
+            addRecording(newRecording);
+            setCount(count + 1);
+          } catch (error) {
+            console.error("Error uploading recording:", error);
+          }
+
           chunksRef.current = [];
-          setCount(count + 1);
         };
 
         mediaRecorderRef.current = mediaRecorder;
@@ -53,31 +67,9 @@ const Recorder = ({ addRecording }) => {
       });
   };
 
-  const stopRecording = async () => {
+  const stopRecording = () => {
     mediaRecorderRef.current.stop();
     setIsRecording(false);
-
-    const blob = new Blob(chunksRef.current, { type: "video/webm" });
-    const formData = new FormData();
-    formData.append("recording", blob, "recording.webm");
-
-    try {
-      const response = await axios.post(
-        "http://localhost:3001/api/upload",
-        formData
-      );
-        console.log(newRecording);
-      // Simulate updating the recording status after processing
-      const updatedRecording = {
-        ...newRecording,
-        status: response.data.status,
-      };
-      addRecording(updatedRecording);
-    } catch (error) {
-      console.error("Error uploading recording:", error);
-    }
-
-    chunksRef.current = [];
   };
 
   const formatRecordingLength = (seconds) => {
@@ -93,7 +85,7 @@ const Recorder = ({ addRecording }) => {
         <input
           type="text"
           value={recordingName}
-          onChange={(e) => setRecordingName(e.target.value + 1)}
+          onChange={(e) => setRecordingName(e.target.value)}
         />
       </div>
       <div>
@@ -102,9 +94,7 @@ const Recorder = ({ addRecording }) => {
         </button>
       </div>
       <div>
-        {isRecording && (
-          <video ref={videoRef} autoPlay muted style={{ maxWidth: "100%" }} />
-        )}
+        {isRecording && <video autoPlay muted style={{ maxWidth: "100%" }} />}
       </div>
     </div>
   );
